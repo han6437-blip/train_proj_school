@@ -2,6 +2,8 @@
 
 > 核验时间：2026-08-10。本文按各框架官方文档的当前口径整理，重点是架构原理、生产可靠性和面试回答，不是 API 安装手册。
 
+> 项目映射场景：企业机房、服务器与办公电脑故障咨询，维修工程师匹配和上门预约。
+
 ## 0. 先记住三句话
 
 1. **LangGraph 主要解决“流程怎样可靠推进和恢复”**：状态图、循环、并行、Checkpoint、HITL 和长期运行。
@@ -348,7 +350,7 @@ QueryEngine 可以包装成 Agent Tool，让一条完整 RAG Pipeline 成为 Age
    会增加路由错误、上下文复制、延迟、成本和调试难度。只有需要上下文隔离、独立权限、并行专家或角色接管时才拆分。
 
 8. **Supervisor、Handoff、Router、Agents-as-Tools 如何选？**  
-   Supervisor/Agents-as-Tools 适合集中控制；Handoff 适合专家接管用户对话；Router 适合明确分类和并行分发。
+Agents-as-Tools 是一种集中控制实现：主 Agent 通过 Tool Calling 调用子 Agent；LangGraph 自定义 Workflow 也可以把 Supervisor 做成决策节点，再用条件边或`Command`路由到专业节点/子图。Handoff 适合专家接管用户对话；Router 适合一次分类和分发。本机房与电脑维修项目选择 LangGraph 节点/子图编排，不采用 Agents-as-Tools。
 
 ### 6.2 可靠性与安全
 

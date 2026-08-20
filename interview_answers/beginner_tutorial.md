@@ -1,33 +1,23 @@
-# 企业售后预约 Agent：初学者项目基础课
+# 企业机房与办公电脑维修 Agent：初学者项目基础课
 
-> 目标：读完这份教程并运行两个示例后，你应该能顺利阅读本目录中的 69 道面试题回答，理解每个技术名词为什么出现、解决什么问题、失败时怎么办，而不是只背术语。
+> 目标：读完这份教程后，你应该能顺利阅读本目录中的 69 道面试题回答，理解每个技术名词为什么出现、解决什么问题、失败时怎么办，而不是只背术语。当前快照没有配套示例代码，文中的示例流程只能作为待实现规格。
 
 ## 怎么使用这份教程
 
 建议按三遍学习：
 
 1. **第一遍只看主线**：先理解一次请求怎样从用户走到数据库，不纠结公式。
-2. **第二遍运行示例**：亲眼看到重复请求、重复消息和未确认工具调用如何被拦截。
+2. **第二遍推演示例**：按状态图和伪代码检查重复请求、重复消息和未确认工具调用应如何被拦截；补齐代码后再运行验证。
 3. **第三遍返回面试题**：按末尾映射阅读题库，并用“结论—例子—实现—异常—边界”组织回答。
 
-本教程有两个不需要安装第三方库的可运行示例：
-
-- [可靠预约、幂等、Outbox/Inbox](./beginner_examples/reliable_booking_demo.py)
-- [Router、Supervisor、RAG与工具门禁](./beginner_examples/agent_rag_demo.py)
-
-运行方法：
-
-```powershell
-python .\interview_answers\beginner_examples\reliable_booking_demo.py
-python .\interview_answers\beginner_examples\agent_rag_demo.py
-```
+原材料提到两个零依赖教学示例：`beginner_examples/reliable_booking_demo.py`和`beginner_examples/agent_rag_demo.py`，但当前快照没有这些文件。因此本文保留它们的目标行为和验收条件，不提供失效运行链接，也不把机制说明表述成已经通过本地代码验证。
 
 ## 先锁定项目口径与证据边界
 
 学习过程中始终使用同一套项目口径：
 
-- 业务：产品咨询、故障排查、工程师匹配、上门预约和用户偏好沉淀。
-- 架构：1 个主管 Agent 编排 3 类专业 Agent——咨询、预约、用户行为分析。
+- 业务：电脑/服务器故障咨询、资产与机房信息收集、维修工程师匹配、上门预约和用户偏好沉淀。
+- 架构：外层使用 LangGraph `StateGraph`；Router 和 Supervisor 决策节点把在线请求路由到咨询、预约两个专业节点/子图，用户行为分析 Agent 异步消费已完成事件。三类是专业能力分类，不代表都由 Supervisor 在线调用。
 - 工程：Web/API/Agents/Services/DB 五层，16 个 API，30 个场景测试。
 - 目标RAG链路：BM25 + Dense双路召回，RRF融合，Cross-Encoder精排；精排失败回退RRF。
 - 目标记忆链路：短期最近10轮、窗口占用60%时滚动摘要、长期召回Top-5。这些只是首版参数，不是理论最优值。
@@ -40,10 +30,10 @@ python .\interview_answers\beginner_examples\agent_rag_demo.py
 |---|---|---|
 | 已实现且有证据 | 有代码、测试或可展示日志 | “我实现并用……验证了” |
 | 已做基线实验 | 有逐项结果、运行条件和计算口径 | “基线结果记录为……” |
-| 已设计/教学Demo | 有方案或本教程最小示例，不能代表完整项目 | “我设计了……，并用最小Demo验证机制” |
+| 已设计/待验证规格 | 有方案、伪代码和验收条件，但当前没有可运行实现 | “我设计了……，下一步按这些用例验证” |
 | 生产演进 | 尚未在个人项目部署 | “进入生产后我会……” |
 
-当前工作区能直接验证的是面试文档和本教程的两个最小Demo。RAG混合检索、长期记忆、AutoDream、完整权限、SFT/DPO、GGUF部署和生产级Outbox/Inbox，如果没有你自己的代码、测试与日志，一律按“设计方案/教学Demo”讲，不能说成已经上线。没有记录的微调后提升、RAG最终指标、训练硬件、模型文件大小和P95，也不能由公开资料代填。
+当前工作区能直接检查的是面试文档，不能运行材料提到的两个最小 Demo。LangGraph 编排、RAG 混合检索、长期记忆、AutoDream、完整权限、SFT/DPO、GGUF 部署和生产级 Outbox/Inbox，如果没有补回代码、测试与日志，一律按“目标设计/待验证规格”讲，不能说成已经实现或上线。没有记录的微调后提升、RAG 最终指标、训练硬件、模型文件大小和 P95，也不能由公开资料代填。
 
 同理，`2.9个百分点`是项目材料记录的组合指标差值。正式面试前必须补上组合公式、51条逐项结果和运行参数才能独立复现；严格通过率应另报`X/51`。
 
@@ -99,15 +89,15 @@ except ConflictError:
 
 ## 1. 一次请求到底发生了什么
 
-用户说：“洗衣机上不了水，帮我预约明天下午上门维修。”系统不是把这句话直接交给模型后就结束，而是经过以下链路：
+用户说：“机房里一台服务器无法启动，提示找不到启动设备，帮我预约明天下午上门维修。”系统不是把这句话直接交给模型后就结束，而是经过以下链路：
 
 | 阶段 | 负责组件 | 输入 | 输出 | 是否允许副作用 |
 |---|---|---|---|---|
 | 接口入口 | FastAPI/API层 | HTTP、登录信息、JSON | 用户与租户上下文 | 否 |
 | 安全与路由 | 规则 + Router | 用户文本 | `compound`复合任务 | 否 |
-| 故障咨询 | 咨询Agent + RAG | 症状、产品 | 诊断摘要与证据ID | 否 |
-| 槽位提取 | 预约Agent/本地模型 | 对话与当前状态 | 日期、时段、地址等槽位 | 否 |
-| 定向澄清 | 主管Agent | 缺失槽位 | “请补充服务地址” | 否 |
+| 故障咨询 | 咨询Agent + RAG | 资产型号、操作系统、报错与症状 | 诊断摘要与证据ID | 否 |
+| 槽位提取 | 预约Agent/本地模型 | 对话与当前状态 | 资产编号、机房位置、日期和时段等槽位 | 否 |
+| 定向澄清 | 主管Agent | 缺失槽位 | “请补充资产编号和机房位置” | 否 |
 | 候选查询 | 预约服务 | 完整槽位 | 可用工程师和时间 | 只读 |
 | 用户确认 | API/会话状态 | 候选方案 | 有效确认令牌 | 否 |
 | 创建预约 | 业务Service + DB | 已授权命令、幂等键 | 预约记录 | 是 |
@@ -465,9 +455,9 @@ Inbox本质上就是“幂等消费者”的一种数据库实现，但它只保
 
 事件超过最大重试次数后进入死信队列或人工补偿，并对Outbox最老积压时间告警。通知只是预约的派生效果，失败时不回滚已提交预约；只有跨多个核心服务的本地事务必须共同完成时才考虑Saga。Saga的“补偿”是新的业务动作，例如释放资源，并不等于数据库级自动回滚。
 
-## 12. 运行可靠预约示例
+## 12. 可靠预约待实现示例的验收条件
 
-打开并运行[reliable_booking_demo.py](./beginner_examples/reliable_booking_demo.py)。它演示：
+材料提到的`reliable_booking_demo.py`当前不在工作区。补齐该示例时应验证：
 
 1. 第一次创建预约成功；
 2. 相同幂等键重放，返回同一个`booking_id`；
@@ -475,7 +465,7 @@ Inbox本质上就是“幂等消费者”的一种数据库实现，但它只保
 4. Outbox发布成功但未标记SENT，恢复后重复发布；
 5. Inbox识别相同`message_id`，最终通知业务效果仍只有一次。
 
-为保持示例短小，`SlotConflict`会回滚整个事务，因此失败幂等记录不会被长期保存；生产接口如果要求相同Key重放同一个终态错误，需要在回滚业务事务后，用独立短事务安全保存`FAILED_FINAL + error_code`，并设计过期与恢复规则。
+待实现的短示例可以让`SlotConflict`回滚整个事务，因此失败幂等记录不会被长期保存；生产接口如果要求相同 Key 重放同一个终态错误，需要在回滚业务事务后，用独立短事务安全保存`FAILED_FINAL + error_code`，并设计过期与恢复规则。
 
 预期关键输出：
 
@@ -628,7 +618,7 @@ Router通常做一次分类和分发，不持续维护多步计划：
 
 ```python
 def route(text: str) -> str:
-    consult = any(word in text for word in ["故障", "怎么处理", "E03"])
+    consult = any(word in text for word in ["故障", "怎么处理", "蓝屏", "SMART", "无法启动"])
     booking = any(word in text for word in ["预约", "上门", "帮我约"])
     if consult and booking:
         return "compound"
@@ -639,24 +629,24 @@ def route(text: str) -> str:
     return "unknown"
 ```
 
-Supervisor持有当前任务状态，可以先调用咨询Agent，读取结果后再调用预约Agent。项目使用混合方式：简单请求走确定性Router快速路径；“先排查、必要时预约”才进入Supervisor。
+Supervisor 是 LangGraph 中的决策节点，持有当前任务状态并返回下一跳。它先通过条件边或`Command(goto="consult_agent")`进入咨询节点，读取该节点写回 State 的结构化结果，再决定是否路由到预约节点。项目使用混合方式：简单请求走确定性 Router 快速路径；“先排查、必要时预约”才进入 Supervisor 决策循环。这里是图节点/子图编排，不是把专业 Agent 包装成 Tool。
 
 为什么拆专业Agent？咨询和预约的Prompt、工具权限、上下文和评测不同。咨询Agent只需要只读知识能力；预约Agent涉及状态与副作用。但多Agent会增加模型调用、延迟、Trace和状态传递，因此不是越多越好。[LangChain对Router与Supervisor的区分](https://docs.langchain.com/oss/python/langchain/multi-agent/router)
 
 ## 19. ReAct 与可审计执行循环
 
-ReAct可以用“Decision → Action → Observation”理解：
+本项目把 ReAct 用作 Supervisor 决策循环的解释模型，而不是用 Tool Calling 调用子 Agent。可以用“Decision → Graph Route → Observation”理解：
 
 ```text
-Decision: 当前需要查询故障知识
-Action: consult_fault(product="洗衣机", symptom="上不了水")
-Observation: washer-e03文档说明进水超时
+Decision: 当前需要进入咨询节点
+Graph Route: Command(goto="consult_agent")
+Observation: 咨询节点写回 diagnosis_summary 和 source_ids
 
 Decision: 用户还要求预约
-Action: extract_booking_slots(...)
-Observation: 缺少服务地址
+Graph Route: Command(goto="booking_agent")
+Observation: 预约节点写回 missing_slots=["asset_id", "server_room_location"]
 
-Decision: 不猜测地址，向用户澄清
+Decision: 不猜测资产编号和机房位置，向用户澄清
 ```
 
 生产系统审计Decision摘要、Action、参数摘要、Observation引用和状态变化，不依赖或暴露模型的隐藏思维链。
@@ -669,7 +659,7 @@ Decision: 不猜测地址，向用户澄清
 - 相同工具与规范化参数的指纹；
 - 连续没有新增Observation时终止。
 
-Tool指纹只用于循环检测，不能代替业务幂等键。
+图级循环用“当前节点 + 路由标签 + 关键 State 版本”检测无进展；专业节点内部的业务 Tool 指纹只用于工具循环检测，不能代替业务幂等键。
 
 ## 20. Agent State、业务状态机与 Checkpoint
 
@@ -692,23 +682,23 @@ COLLECTING
 
 相对时间也分工处理：模型识别“明天、周五、下午”，确定性时间服务以`request_time + user_timezone`转换为标准时间区间，不能让训练样本中的“明天”脱离时间基准。
 
-## 21. 运行 Agent + RAG 示例
+## 21. Agent + RAG 待实现示例的验收条件
 
-打开并运行[agent_rag_demo.py](./beginner_examples/agent_rag_demo.py)。它展示：
+材料提到的`agent_rag_demo.py`当前不在工作区。补齐该示例时应验证：
 
 - 复合请求被Router标为`compound`；
-- Supervisor先调用咨询能力，再调用预约能力；
+- Supervisor 通过 LangGraph 路由先进入咨询节点，再进入预约节点；
 - RAG先按产品元数据过滤，再执行两路召回与RRF；
 - 预约Agent抽取明天与下午，但发现地址缺失；
 - 未经用户确认的创建工具调用被业务门禁阻止。
 
-示例中的手写概念向量和重排函数只是为了零依赖演示，不能冒充生产Embedding和Cross-Encoder。
+待实现示例可以用手写概念向量和规则重排保持零依赖，但不能冒充生产 Embedding 和 Cross-Encoder。
 
 # 第四部分：RAG 检索增强生成
 
 ## 22. RAG到底解决什么问题
 
-LLM参数里的知识可能过时，也不知道企业私有售后手册。RAG的思路不是立刻重新训练模型，而是在回答前检索相关证据，把证据和问题一起交给模型。
+LLM参数里的知识可能过时，也不知道企业私有的服务器维修手册、驱动/固件说明和机房服务政策。RAG的思路不是立刻重新训练模型，而是在回答前检索相关证据，把证据和问题一起交给模型。
 
 完整链路分两部分。
 
@@ -760,14 +750,14 @@ score(q,d) = Σ IDF(term) ×
 - `k1`：控制词频增长逐渐饱和；
 - `b`：控制文档长度归一化。
 
-它适合型号、故障码和零件编号。例如`XQG100-1436 E03`需要保留完整型号字段，不能随意切碎。
+它适合电脑/服务器型号、错误码和部件编号。例如`PowerEdge-R750 0x0000007B`需要保留完整型号与错误码字段，不能随意切碎。
 
 ## 24. Dense Retrieval、Embedding、Bi-Encoder 与 FAISS
 
 Embedding把文本变成一串数字向量。语义相近的文本在向量空间中距离更近：
 
 ```text
-“水一直进不来” ≈ “进水超时”
+“服务器开机后找不到系统盘” ≈ “无法访问启动设备”
 ```
 
 Bi-Encoder分别编码Query和Document。文档向量可以提前计算，在线只需编码查询并做近邻搜索。余弦相似度是常见比较方式：
@@ -776,9 +766,9 @@ Bi-Encoder分别编码Query和Document。文档向量可以提前计算，在线
 cos(a,b) = (a·b) / (|a|×|b|)
 ```
 
-FAISS负责高效保存和搜索向量，它不是Embedding模型，也不是完整权限数据库。实际检索必须先按租户、产品和版本做命名空间或元数据过滤，不能全库召回后让模型自己判断能否查看。
+FAISS负责高效保存和搜索向量，它不是Embedding模型，也不是完整权限数据库。实际检索必须先按租户、资产型号、操作系统/固件和文档版本做命名空间或元数据过滤，不能全库召回后让模型自己判断能否查看。
 
-BM25和Dense互补：BM25精确但不懂同义表达；Dense懂语义，但可能把“空调E03”和“洗衣机E03”混在一起。因此项目使用双路召回。
+BM25和Dense互补：BM25精确但不懂同义表达；Dense懂语义，但可能把“Windows 启动故障”和“Linux 引导故障”混在一起，或者召回到错误服务器型号的手册。因此项目使用双路召回，并在召回前过滤设备与系统版本。
 
 ## 25. RRF：怎样融合两套排名
 
@@ -870,6 +860,8 @@ LangChain/LangGraph官方也区分会话/线程范围的短期记忆与跨会话
 
 10轮、60%和Top-5只是可配置初始值，应通过长对话消融测试选择，而不是背成行业标准。
 
+完整写入不能简化成“让模型总结后写向量库”。项目的目标协议是`Memory Event → Atomic Candidate → Policy Gate → Stable Key → Reconcile → Idempotent Commit → Derived Index`；同步的明确记住与异步的普通提取共用同一协议。详细对象、冲突规则、存储职责和分阶段落地见[《企业机房与办公电脑维修 Agent：记忆系统工程化设计》](./memory_system_design.md)。
+
 ## 29. 为什么摘要不能替代结构化状态
 
 用户先说“不要周末”，后面说“这周六可以”。粗暴摘要可能写成“用户喜欢周六”，造成长期误判。更合理的结构是：
@@ -877,17 +869,22 @@ LangChain/LangGraph官方也区分会话/线程范围的短期记忆与跨会话
 ```python
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 @dataclass
-class MemoryItem:
+class MemoryCandidate:
+    candidate_id: str
+    event_id: str
     tenant_id: str
     user_id: str
-    kind: str                 # preference / event / summary
-    value: str
-    source_message_id: str
-    updated_at: datetime
+    memory_type: str          # semantic / preference / episodic / procedural
+    memory_key: str           # 稳定身份，不用相似文本代替
+    value: Any
+    applicability: str        # default / session_exception
+    valid_from: datetime
+    source_id: str
     confidence: float
-    scope: str                # long_term / session_exception
+    proposed_ttl_days: int | None
 ```
 
 长期偏好仍是“尽量避开周末”，本次会话增加“本周六例外”。执行高风险动作前回查原始确认消息和数据库，而不是只信摘要。
@@ -916,6 +913,8 @@ AutoDream是社区项目启发的后台记忆巩固思路，不应冒充Claude C
 
 当前原始材料把AutoDream等列为增强方案。没有相应代码、测试和日志时，简历与面试应使用“设计”而不是“已上线”。
 
+落库时还要把“记忆状态”和“检索索引”分开：关系型表保存当前状态、历史版本和操作日志，全文/向量/图索引只作为可重建的派生视图。`operation_id`保证重试幂等，`memory_key + version`做CAS；版本冲突时重读并重新比较，不能覆盖写。用户更正和删除也生成确定性Memory Operation，走相同的权限、事务、审计和索引同步链路。
+
 # 第六部分：本地小模型后训练与部署
 
 ## 31. 为什么把槽位提取交给小模型
@@ -934,15 +933,17 @@ AutoDream是社区项目启发的后台记忆巩固思路，不应冒充Claude C
 {
   "action":"FINAL",
   "slots":{
-    "device":"洗衣机",
+    "device":"机房服务器",
+    "asset_id":"SRV-A-023",
+    "fault_code":"NO_BOOT_DEVICE",
     "service_date":"2026-08-10",
     "time_range":{"start":"13:00","end":"18:00"}
   },
-  "missing_slots":["service_address"]
+  "missing_slots":["server_room_location"]
 }
 ```
 
-JSON Schema能检查字段和类型，却不能判断日期是否基于正确时区、地址是否由模型编造、用户是否确认。完整验证顺序是：
+JSON Schema能检查字段和类型，却不能判断日期是否基于正确时区、资产编号或机房位置是否由模型编造、用户是否确认。完整验证顺序是：
 
 ```text
 JSON解析 → Pydantic/Schema → 时间与枚举
@@ -1006,9 +1007,9 @@ SFT教“标准答案长什么样”；DPO教“两个都像答案时，应该�
 
 ```json
 {
-  "prompt":"当前没有服务地址，用户要求明天下午预约。",
-  "chosen":"返回missing_slots=[service_address]，不调用工具",
-  "rejected":"JSON合法，但编造默认地址并调用create_booking"
+  "prompt":"当前没有资产编号和机房位置，用户要求明天下午预约服务器维修。",
+  "chosen":"返回missing_slots=[asset_id, server_room_location]，不调用工具",
+  "rejected":"JSON合法，但编造资产编号和默认机房并调用create_booking"
 }
 ```
 
@@ -1251,7 +1252,7 @@ flowchart LR
 
 ## 47. 一次请求的完整责任链
 
-继续使用“空调报E3，帮我预约明天下午维修”这个例子：
+继续使用“机房服务器无法启动并提示找不到启动设备，帮我预约明天下午维修”这个例子：
 
 | 顺序 | 动作 | 责任组件 | 产物/事实源 | 失败处理 |
 |---:|---|---|---|---|
@@ -1280,14 +1281,14 @@ flowchart LR
 面对一道题，按以下顺序讲，通常比堆术语更可信：
 
 1. **结论**：一句话说选择与边界；
-2. **项目例子**：把概念放回售后预约请求；
+2. **项目例子**：把概念放回机房电脑维修咨询与预约请求；
 3. **实现**：数据结构、事务、状态机或关键代码；
 4. **异常与权衡**：失败窗口、重试、降级、并发与安全；
 5. **证据边界**：已测什么、指标是什么、哪些是生产演进。
 
 例如回答“为什么要Outbox”：
 
-> 我用Outbox解决预约写库与事件发布的双写不一致。创建预约时，在同一数据库事务里写Booking和`BOOKING_CREATED`事件；提交后Worker至少一次发布。Worker可能在发布成功、标记SENT前崩溃，所以消费者用Inbox在同一事务里登记`event_id`并执行业务效果。它保证的是本地效果去重，不自动保证外部短信绝不重复，短信供应商还需支持幂等键。当前教程Demo验证了事务与重复消费机制，生产还需接真实Broker并做故障演练。
+> 我用Outbox解决预约写库与事件发布的双写不一致。创建预约时，在同一数据库事务里写Booking和`BOOKING_CREATED`事件；提交后Worker至少一次发布。Worker可能在发布成功、标记SENT前崩溃，所以消费者用Inbox在同一事务里登记`event_id`并执行业务效果。它保证的是本地效果去重，不自动保证外部短信绝不重复，短信供应商还需支持幂等键。当前文档给出了事务与重复消费机制的待验证规格；补回代码后还需执行故障测试，生产再接真实Broker并做演练。
 
 这段回答有动机、实现、失败窗口、边界和证据，比“用了Outbox保证最终一致性”更完整。
 
@@ -1319,7 +1320,7 @@ flowchart LR
 每一步都要自己说或自己运行，不要只看：
 
 1. 画出第47节的全链路，不看答案讲3分钟；
-2. 运行两个Demo，分别删掉唯一约束、Inbox或确认检查，观察不变量怎样被破坏；
+2. 补回两个教学示例后运行故障实验，分别删掉唯一约束、Inbox或确认检查，观察不变量怎样被破坏；
 3. 手算一遍RRF，解释`rank_constant`为什么不是Top-K；
 4. 写一个相同Key不同参数返回409的测试；
 5. 画出`COLLECTING → READY_TO_CONFIRM → CREATING → CREATED`，解释修改时间为何让确认失效；

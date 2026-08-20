@@ -1,5 +1,7 @@
 # 现场题：10 题参考回答
 
+> 业务场景：企业机房、服务器与办公电脑故障咨询，维修工程师匹配和上门预约。
+
 ## 1. 画出“咨询后继续预约”的 Agent 状态图
 
 我会先说明：图中LLM只负责理解和选择能力，所有副作用都必须经过确定性确认与业务服务。
@@ -10,14 +12,15 @@ flowchart TD
     B --> C{"确定性路由"}
     C -->|简单咨询| D["咨询 Agent"]
     C -->|简单预约| G["预约 Agent"]
-    C -->|复合任务| E["主管 Agent"]
-    E --> D
+    C -->|复合任务| E["Supervisor 决策节点"]
+    E -->|Command: goto consult_agent| D
     D --> D1["BM25 + Dense"]
     D1 --> D2["RRF + Cross-Encoder"]
     D2 --> D3["生成带依据的诊断结果"]
-    D3 --> E
-    E -->|需要预约| G
-    E -->|无需预约| Z["最终答复"]
+    D3 -->|复合任务：State 写回| E
+    D3 -->|简单咨询| Z["finalize / 最终答复"]
+    E -->|Command: goto booking_agent| G
+    E -->|无需预约 / goto finalize| Z
     G --> H["本地模型提取槽位"]
     H --> I{"槽位完整且合法?"}
     I -->|否| J["定向澄清并保存检查点"]
@@ -28,11 +31,18 @@ flowchart TD
     M -->|否| J
     M -->|是| N["权限、参数、幂等、冲突复查"]
     N --> O["事务创建预约 + Outbox"]
-    O --> E
-    E --> Z
+    O -->|复合任务：State 写回| E
+    O -->|简单预约| Z
+    O -.-> P["Memory Event"]
+    Z -.-> P
+    P --> Q["Policy + Reconcile + 版本化 Memory Store"]
 ```
 
 状态中保存`task_stage`、设备和故障、预约槽位、候选方案版本、确认令牌、幂等键和工具结果引用。暂停澄清后从检查点恢复，不重新执行已完成的咨询和检索。创建预约前再次查数据库，避免候选方案在用户思考期间已经被别人占用。
+
+这里的咨询和预约是 LangGraph 节点/子图，E 节点通过 State、条件边或`Command`选择下一跳，不把专业 Agent 包装成 Tool。RAG 检索、工程师查询和预约 Service 才是专业节点内部使用的业务工具。
+
+记忆写入是旁路协议：消息、工具结果和已提交业务事件先形成不可变 Memory Event，再经 Candidate、Policy、稳定 Key、冲突处理和幂等事务进入版本化 Store。行为分析 Agent 最多提出候选，不能直接写用户画像；预约与排班仍以业务数据库为事实源。
 
 ## 2. 写出 RRF 公式并手算融合排名
 
@@ -120,14 +130,14 @@ UNIQUE(tenant_id, user_id, operation_type, idempotency_key)
 
 ## 5. 给出一条 SFT 和一条 DPO 训练样本
 
-SFT样本用于教会模型在缺少地址时不调用工具：
+SFT样本用于教会模型在缺少资产编号和机房位置时不调用工具：
 
 ```json
 {
   "messages": [
     {"role": "system", "content": "你负责预约槽位提取，只输出规定JSON，不得猜测缺失字段。请求基准时间为2026-08-08T10:00:00+08:00，用户时区为Asia/Shanghai。"},
-    {"role": "user", "content": "洗衣机报E03，帮我约明天下午维修。"},
-    {"role": "assistant", "content": "{\"action\":\"FINAL\",\"slots\":{\"device\":\"洗衣机\",\"fault_code\":\"E03\",\"date\":\"2026-08-09\",\"time_range\":{\"start\":\"13:00\",\"end\":\"18:00\"}},\"missing_slots\":[\"service_address\"],\"need_confirmation\":false}"}
+    {"role": "user", "content": "机房服务器无法启动并提示找不到启动设备，帮我约明天下午维修。"},
+    {"role": "assistant", "content": "{\"action\":\"FINAL\",\"slots\":{\"device\":\"机房服务器\",\"fault_code\":\"NO_BOOT_DEVICE\",\"date\":\"2026-08-09\",\"time_range\":{\"start\":\"13:00\",\"end\":\"18:00\"}},\"missing_slots\":[\"asset_id\",\"server_room_location\"],\"need_confirmation\":false}"}
   ]
 }
 ```
@@ -136,9 +146,9 @@ DPO样本让模型在两个格式都合法的答案中偏好“不脑补”：
 
 ```json
 {
-  "prompt": "请求基准时间：2026-08-08T10:00:00+08:00，用户时区：Asia/Shanghai。用户：洗衣机报E03，帮我约明天下午维修。当前上下文没有服务地址。",
-  "chosen": "{\"action\":\"FINAL\",\"missing_slots\":[\"service_address\"],\"need_confirmation\":false}",
-  "rejected": "{\"action\":\"TOOL_CALL\",\"tool\":\"create_booking\",\"arguments\":{\"service_address\":\"用户默认地址\"}}"
+  "prompt": "请求基准时间：2026-08-08T10:00:00+08:00，用户时区：Asia/Shanghai。用户：机房服务器无法启动并提示找不到启动设备，帮我约明天下午维修。当前上下文没有资产编号和机房位置。",
+  "chosen": "{\"action\":\"FINAL\",\"missing_slots\":[\"asset_id\",\"server_room_location\"],\"need_confirmation\":false}",
+  "rejected": "{\"action\":\"TOOL_CALL\",\"tool\":\"create_booking\",\"arguments\":{\"asset_id\":\"模型猜测的资产编号\",\"server_room_location\":\"用户默认机房\"}}"
 }
 ```
 

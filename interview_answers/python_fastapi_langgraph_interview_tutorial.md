@@ -2,8 +2,8 @@
 
 > 版本：2026-08-10  
 > 定位：面试冲刺，不是三套技术的完整手册。  
-> 贯穿案例：企业售后咨询与上门预约 Agent。  
-> 配套代码：[FastAPI + LangGraph 教学 Demo](./python_fastapi_langgraph_demo/)
+> 贯穿案例：企业机房、服务器与办公电脑故障咨询及上门维修预约 Agent。  
+> 代码边界：原材料引用`python_fastapi_langgraph_demo/`，但当前快照没有该目录。本教程中的代码片段和运行流程属于待实现规格，不能表述为已经本地验证。
 
 ## 0. 先说结论：面试官真正想确认什么
 
@@ -400,7 +400,7 @@ HTTPException 要 raise，不是 return。
 
 AI 聊天通常是服务端单向推 token 或进度，SSE 比 WebSocket 简单；只有持续双向实时交互才优先 WebSocket。
 
-FastAPI 0.135.0 起提供原生 SSE；配套 Demo 因此把最低版本锁在 0.135。旧版本可用 StreamingResponse 或第三方 EventSourceResponse。面试不必背版本 API，但必须说出：
+FastAPI 0.135.0 起提供原生 SSE；补回配套 Demo 时若使用该 API，应把最低版本锁在 0.135。旧版本可用 StreamingResponse 或第三方 EventSourceResponse。面试不必背版本 API，但必须说出：
 
 - Content-Type 为 text/event-stream；
 - token、progress、done、error 应有明确事件类型；
@@ -684,11 +684,13 @@ finished = graph.invoke(
 
 多 Agent 的成本是额外 token、延迟、错误面和可观测难度。它的价值应来自上下文隔离、权限隔离、可并行分工或不同模型专长，而不是为了简历上多一个名词。
 
+本项目固定选择“节点/子图编排”而不是“Subagent-as-Tool”：咨询 Agent 和预约 Agent 编译为节点或子图，Router 与 Supervisor 决策节点通过条件边或`Command(goto=...)`调度，共享必要的结构化 State。RAG 检索、工程师查询和预约 Service 才是专业节点内部调用的业务工具。用户行为分析 Agent 通过 Outbox 等异步事件运行，不进入在线图。LangGraph 虽然也支持把 subagent 包成 Tool，但那不是本项目采用的模式。
+
 ---
 
 # 第四部分：把 FastAPI 和 LangGraph 串起来
 
-## 20. 配套 Demo 的架构
+## 20. 待实现 Demo 的目标架构
 
 ~~~mermaid
 flowchart LR
@@ -701,13 +703,9 @@ flowchart LR
     H -->|reject| R["取消"]
 ~~~
 
-代码位置：
+预期代码位置为`python_fastapi_langgraph_demo/app.py`、`test_app.py`和`README.md`，当前均不存在。补回文件和依赖锁定后，才能执行下述验收。
 
-- [应用代码](./python_fastapi_langgraph_demo/app.py)
-- [接口测试](./python_fastapi_langgraph_demo/test_app.py)
-- [运行说明](./python_fastapi_langgraph_demo/README.md)
-
-这个 Demo 故意不用真实 LLM：
+目标 Demo 首版可以不用真实 LLM：
 
 - 分类器是确定性规则，便于看懂流程；
 - RAG 是固定文档桩；
@@ -721,7 +719,9 @@ flowchart LR
 
 > 我先用确定性替身把编排、恢复和接口契约测通，再把分类节点替换为模型结构化输出，把检索节点替换为真实混合检索。这样工作流测试不依赖模型概率和外部账单。
 
-## 21. 运行顺序
+## 21. 补回代码后的运行顺序
+
+以下命令只有在`python_fastapi_langgraph_demo`目录、依赖文件和应用代码补齐后才可运行；当前快照不能执行。
 
 ~~~powershell
 cd ./interview_answers/python_fastapi_langgraph_demo
@@ -748,7 +748,7 @@ X-User-ID: user-1
 {
   "thread_id": "chat-001",
   "request_id": "018f6f10-90c3-7b52-8a64-9b24940d55d7",
-  "message": "洗衣机不进水应该怎么检查？"
+  "message": "机房服务器硬盘持续告警应该怎么检查？"
 }
 ~~~
 
@@ -763,11 +763,11 @@ FAQ 路径直接完成。预约类输入会在 review_booking 节点 interrupt�
 }
 ~~~
 
-## 22. Demo 中值得被追问的设计
+## 22. 目标 Demo 中值得被追问的设计
 
 ### 为什么内部 thread key 来自 tenant_id、user_id 和公开 thread_id
 
-客户端提供的 thread_id 只是公开标识。Demo 把可信 Actor tuple 做规范序列化和 SHA-256 摘要，避免 `a:b:c` 拼接产生分隔符碰撞。它演示的是 namespace 隔离，不是真实鉴权：裸 X-User-ID 可以伪造，生产必须使用已验证的 token claims，并检查 owner ACL。
+客户端提供的 thread_id 只是公开标识。目标 Demo 应把可信 Actor tuple 做规范序列化和 SHA-256 摘要，避免`a:b:c`拼接产生分隔符碰撞。该设计只演示 namespace 隔离，不是真实鉴权：裸 X-User-ID 可以伪造，生产必须使用已验证的 token claims，并检查 owner ACL。
 
 生产中还要：
 
@@ -778,7 +778,7 @@ FAQ 路径直接完成。预约类输入会在 review_booking 节点 interrupt�
 
 ### 为什么副作用在 interrupt 之后
 
-恢复会重跑节点。若先创建预约再 interrupt，重复恢复可能重复创建。Demo 使用“草案 → 确认 → 幂等创建”的结构；相同 operation_id 若对应不同动作会冲突，而不是静默复用旧结果。生产再用数据库唯一约束兜底。
+恢复会重跑节点。若先创建预约再 interrupt，重复恢复可能重复创建。目标实现应使用“草案 → 确认 → 幂等创建”的结构；相同 operation_id 若对应不同动作应冲突，而不是静默复用旧结果。生产再用数据库唯一约束兜底。
 
 ### 为什么 graph 在 lifespan 编译
 
@@ -786,11 +786,11 @@ FAQ 路径直接完成。预约类输入会在 review_booking 节点 interrupt�
 
 ### 为什么内存锁仍不够
 
-Demo 用每个内部 thread 一把 asyncio.Lock，把“检查 pending → 恢复 checkpoint”串行化；但它只能保护一个进程。多 worker、多实例或进程重启后仍会竞态，生产要用持久审批记录和数据库 CAS 原子完成 `PENDING → APPROVED | REJECTED`，写操作再以事务和唯一约束兜底。
+目标 Demo 可以为每个内部 thread 使用一把 asyncio.Lock，把“检查 pending → 恢复 checkpoint”串行化；但它只能保护一个进程。多 worker、多实例或进程重启后仍会竞态，生产要用持久审批记录和数据库 CAS 原子完成`PENDING → APPROVED | REJECTED`，写操作再以事务和唯一约束兜底。
 
 ### 为什么还要做 checkpoint 对账
 
-图、业务数据库和 HTTP 幂等响应不是天然的一笔事务。预约可能已成功，但 handler 可能在缓存响应时异常或被取消。Demo 会先 claim 审批决定，并演示**同一进程内**的对账：若 interrupt 仍在就按同一决定恢复，若后续节点失败就从最新 checkpoint 继续，若图已完成就重建最终响应。它的三份存储都是内存实现，真实进程退出后无法恢复；生产必须持久化 checkpointer、请求状态机和业务结果，再使用 lease/reconciliation job 按 operation_id 对账。`asyncio.shield()` 只能缩小取消窗口，不能消除进程崩溃窗口。
+图、业务数据库和 HTTP 幂等响应不是天然的一笔事务。预约可能已成功，但 handler 可能在缓存响应时异常或被取消。目标 Demo 应先 claim 审批决定，并覆盖**同一进程内**的对账：若 interrupt 仍在就按同一决定恢复，若后续节点失败就从最新 checkpoint 继续，若图已完成就重建最终响应。首版三份存储可以使用内存实现，但真实进程退出后无法恢复；生产必须持久化 checkpointer、请求状态机和业务结果，再使用 lease/reconciliation job 按 operation_id 对账。`asyncio.shield()`只能缩小取消窗口，不能消除进程崩溃窗口。
 
 ---
 
@@ -1047,7 +1047,7 @@ START → classify
 | 2 | Pydantic、FastAPI 路由/Depends/lifespan；写 /chat |
 | 3 | SSE、错误码、测试；模拟超时、429、坏 JSON |
 | 4 | LangGraph State/Reducer/路由；默写最小图 |
-| 5 | checkpoint、thread_id、interrupt；跑通配套 Demo |
+| 5 | checkpoint、thread_id、interrupt；按验收条件补齐并跑通配套 Demo |
 | 6 | RAG、评测、Tracing、安全；画一次完整架构 |
 | 7 | 20 道问答录音 + 3 道现场题 + 项目五分钟陈述 |
 
@@ -1063,7 +1063,7 @@ START → classify
 
 示例口述：
 
-> 我做的是企业售后咨询和上门预约。咨询需要 RAG，预约有真实副作用，所以没有让模型直接写库。我用 FastAPI 承接认证与接口契约，用 LangGraph 显式表达路由、状态和人工确认，预约执行放在确认之后，并以业务操作 ID 做幂等。离线按路由、检索、工具和端到端任务分别评测，线上记录 TTFT、P95、工具错误率、token 和人工接管率。当前 Demo 的 checkpoint 和预约存储仍是内存实现，生产会迁移到 Postgres，并补租户 ACL、限流和持久任务队列。
+> 我设计的是企业机房、服务器与办公电脑故障咨询和上门维修预约系统。咨询需要 RAG，预约有真实副作用，所以不让模型直接写库。我用 FastAPI 承接认证与接口契约，用 LangGraph 显式表达路由、状态和人工确认，预约执行放在确认之后，并以业务操作 ID 做幂等。离线按路由、检索、工具和端到端任务分别评测，线上记录 TTFT、P95、工具错误率、token 和人工接管率。当前快照没有配套 Demo 代码；补齐时可先使用内存 checkpoint 和预约存储，再迁移到 Postgres，并加入租户 ACL、限流和持久任务队列。
 
 ## 34. 最后自检
 

@@ -2,7 +2,7 @@
 
 > 版本：2026-08-10  
 > 定位：面向 AI 应用开发与面试，不是三套产品的完整运维手册。  
-> 贯穿案例：企业售后知识库，按租户检索产品手册、故障方案和服务政策。  
+> 贯穿案例：企业机房与办公电脑维修知识库，按租户检索服务器/电脑手册、操作系统与固件说明、故障方案和服务政策。  
 > 示例版本口径：Milvus 3.0.0 + PyMilvus 3.0.1、Elasticsearch 9.4.x、Chroma 1.5.9；生产项目应固定客户端与服务端版本并核对兼容矩阵。
 
 ## 0. 先说结论：真正需要掌握的不是三套 CRUD
@@ -22,7 +22,7 @@
 2. **ANN 用可控的召回损失换取延迟与吞吐。** `top_k`、`ef`、`num_candidates`、`nprobe` 都不是越大越好，要在自己的查询集上画 Recall—Latency 曲线。
 3. **Embedding 模型、维度、归一化方式和距离度量必须作为同一份数据契约管理。** 即使新旧模型维度相同，两个向量空间通常也不能混搜。
 4. **权限条件必须进入检索过滤表达式。** 不能先跨租户召回，再依赖 LLM 或应用代码“尽量删掉”。
-5. **关键词与语义检索互补。** 产品型号、错误码、人名等精确词常由 BM25 占优；同义改写和自然语言意图常由 Dense 检索占优，RRF 是稳健的融合起点。
+5. **关键词与语义检索互补。** 电脑/服务器型号、部件编号、蓝屏或固件错误码等精确词常由 BM25 占优；同义改写和自然语言故障描述常由 Dense 检索占优，RRF 是稳健的融合起点。
 6. **没有通用最优向量库。** Chroma 适合快速原型和轻量本地应用；Elasticsearch 适合搜索本来就是主业务、需要 BM25/过滤/聚合的团队；Milvus 适合把大规模向量检索当成独立基础设施的场景。最终用数据规模、过滤分布、Recall、P95/P99、QPS、成本和运维能力做基准测试。
 
 ### 建议学习顺序
@@ -189,9 +189,9 @@ Dense 语义检索擅长“表达不同但意思相近”，BM25/稀疏检索擅
 
 | 查询 | 更可能占优的通道 |
 |---|---|
-| “设备无法启动怎么办”与“开机无响应排查” | Dense |
-| 错误码 `E37-0421` | BM25 |
-| 型号 `ZX-9 Pro` | BM25 |
+| “服务器开机后找不到系统盘”与“无法访问启动设备” | Dense |
+| 蓝屏停止代码 `0x0000007B` | BM25 |
+| 服务器型号 `PowerEdge-R750` | BM25 |
 | 用户只描述现象、未使用手册术语 | Dense |
 
 RRF（Reciprocal Rank Fusion）按各通道的**名次**融合，而不要求分数同尺度：
@@ -383,8 +383,8 @@ collection = client.get_or_create_collection(
 )
 
 texts = [
-    "E37-0421 表示进水保护已触发，应先断电并联系售后。",
-    "设备无法开机时，先检查电源适配器与指示灯状态。",
+    "Windows 停止代码 0x0000007B 表示无法访问启动设备，应检查磁盘连接、存储控制器模式和启动配置。",
+    "办公电脑无法开机时，先检查电源、指示灯、显示器连接和主板自检提示。",
 ]
 
 collection.upsert(
@@ -412,7 +412,7 @@ collection.upsert(
 )
 
 result = collection.query(
-    query_embeddings=[embed_query("E37-0421 怎么处理")],
+    query_embeddings=[embed_query("蓝屏代码 0x0000007B 怎么处理")],
     n_results=10,
     where={
         "$and": [
@@ -569,9 +569,9 @@ client.upsert(
             "doc_id": "manual-7",
             "status": "published",
             "acl_group": "customer",
-            "text": "E37-0421 表示进水保护已触发。",
+            "text": "Windows 停止代码 0x0000007B 表示无法访问启动设备。",
             "embedding": embed_documents(
-                ["E37-0421 表示进水保护已触发。"]
+                ["Windows 停止代码 0x0000007B 表示无法访问启动设备。"]
             )[0],
         }
     ],
@@ -580,7 +580,7 @@ client.upsert(
 hits = client.search(
     collection_name="support_kb_v1",
     anns_field="embedding",
-    data=[embed_query("E37-0421 怎么处理")],
+    data=[embed_query("蓝屏代码 0x0000007B 怎么处理")],
     filter=(
         'tenant_id == "acme" and status == "published" '
         'and acl_group == "customer"'
@@ -743,7 +743,7 @@ POST support-kb-v1/_search
               "bool": {
                 "must": {
                   "multi_match": {
-                    "query": "E37-0421 怎么处理",
+                    "query": "蓝屏代码 0x0000007B 怎么处理",
                     "fields": ["title^2", "text"]
                   }
                 },
@@ -802,7 +802,7 @@ RRF 根据排名融合，不需要手工把无界的 BM25 分数归一化到向�
 
 ~~~json
 {
-  "query": "E37-0421 怎么处理",
+  "query": "蓝屏代码 0x0000007B 怎么处理",
   "tenant_id": "acme",
   "roles": ["customer"],
   "relevant_chunk_ids": ["acme:manual-7:v3:0"],
